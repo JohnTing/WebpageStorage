@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>網頁儲存器 (Web Page Saver)</title>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+            --light-gray: #f8f9fa;
+            --dark-gray: #343a40;
+            --border-color: #dee2e6;
+            --nav-height: 60px;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: var(--light-gray);
+            color: var(--dark-gray);
+            padding-top: var(--nav-height); /* 為固定導覽列預留空間 */
+            overflow: hidden; /* 防止滾動條在全螢幕模式下出現 */
+        }
+
+        #top-nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: var(--nav-height);
+            background-color: #ffffff;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 1000;
+            box-sizing: border-box;
+        }
+
+        .nav-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px; /* 按鈕間的間距 */
+        }
+
+        #top-nav button, #top-nav select {
+            padding: 8px 15px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        #top-nav button:hover, #top-nav select:hover {
+            border-color: var(--primary-color);
+        }
+
+        #add-new-btn {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        #delete-page-btn {
+            background-color: var(--danger-color);
+            color: white;
+        }
+
+        #fullscreen-btn {
+            background-color: var(--info-color);
+            color: white;
+        }
+
+        #rename-page-btn { /* 新增樣式 */
+            background-color: #ffc107; /* 警告色 */
+            color: var(--dark-gray);
+        }
+        #rename-page-btn:hover {
+            background-color: #e0a800;
+        }
+
+
+        #delete-page-btn:disabled, #rename-page-btn:disabled { /* 讓重新命名按鈕也能禁用 */
+            background-color: #6c757d;
+            cursor: not-allowed;
+            color: white; /* 確保禁用時文字顏色也正確 */
+        }
+
+        #main-content {
+            padding: 20px;
+            height: calc(100vh - var(--nav-height)); /* 讓 main-content 填滿剩餘高度 */
+            box-sizing: border-box;
+            display: flex; /* 設置為 flex 容器 */
+            flex-direction: column; /* 子元素垂直排列 */
+        }
+
+        #add-page-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            flex-grow: 0; /* 不讓它伸展 */
+            display: none; /* 預設隱藏 */
+        }
+
+        #add-page-container h2 {
+            margin-top: 0;
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        #page-title-input, #html-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            margin-bottom: 20px;
+            box-sizing: border-box; /* 確保 padding 不會影響寬度 */
+            font-size: 16px;
+        }
+
+        #html-input {
+            min-height: 400px;
+            resize: vertical;
+            font-family: "Courier New", Courier, monospace;
+        }
+
+        #save-btn {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            font-size: 18px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        #save-btn:hover {
+            background-color: #218838;
+        }
+
+        #content-iframe {
+            width: 100%;
+            height: 100%; /* 讓 iframe 填滿父容器的剩餘空間 */
+            border: none;
+            background-color: white;
+            display: none; /* 預設隱藏 */
+        }
+
+        /* 全螢幕模式下的 CSS 樣式 */
+        body.fullscreen-iframe {
+            overflow: hidden; /* 防止滾動條 */
+        }
+
+        body.fullscreen-iframe #top-nav {
+            display: none; /* 隱藏導覽列 */
+        }
+
+        body.fullscreen-iframe #main-content {
+            padding: 0;
+            height: 100vh; /* 佔滿整個視窗高度 */
+            width: 100vw; /* 佔滿整個視窗寬度 */
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 999; /* 確保在最上層 */
+        }
+
+        body.fullscreen-iframe #content-iframe {
+            width: 100%;
+            height: 100%;
+        }
+
+        #exit-fullscreen-btn {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 8px 12px;
+            font-size: 14px;
+            cursor: pointer;
+            z-index: 1001;
+            display: none; /* 預設隱藏 */
+        }
+
+        #exit-fullscreen-btn:hover {
+            background-color: rgba(0, 0, 0, 0.9);
+        }
+    </style>
+</head>
+<body>
+
+    <nav id="top-nav">
+        <div class="nav-controls">
+            <button id="add-new-btn">➕ 新增網頁</button>
+            <select id="page-selector">
+                <option value="">-- 請選擇要顯示的網頁 --</option>
+            </select>
+            <button id="rename-page-btn" disabled>✏️ 更改網頁名稱</button> <button id="delete-page-btn" disabled>🗑️ 刪除目前網頁</button>
+            <button id="fullscreen-btn">🖼️ 全螢幕</button>
+        </div>
+    </nav>
+
+    <main id="main-content">
+        <div id="add-page-container">
+            <h2>儲存一個新的網頁</h2>
+            <p>請在下方輸入網頁標題與完整的 HTML 程式碼。</p>
+            <input type="text" id="page-title-input" placeholder="請輸入網頁標題（例如：Google 首頁）" required>
+            <textarea id="html-input" placeholder="在這裡貼上完整的 HTML 程式碼..."></textarea>
+            <button id="save-btn">儲存網頁</button>
+        </div>
+
+        <iframe id="content-iframe" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+    </main>
+
+    <button id="exit-fullscreen-btn">✖ 離開全螢幕</button>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- DOM 元素獲取 ---
+        /** @type {HTMLElement} */
+        const addPageContainer = document.getElementById('add-page-container');
+        /** @type {HTMLIFrameElement} */
+        const contentIframe = document.getElementById('content-iframe');
+        /** @type {HTMLButtonElement} */
+        const saveBtn = document.getElementById('save-btn');
+        /** @type {HTMLInputElement} */
+        const titleInput = document.getElementById('page-title-input');
+        /** @type {HTMLTextAreaElement} */
+        const htmlInput = document.getElementById('html-input');
+        /** @type {HTMLSelectElement} */
+        const pageSelector = document.getElementById('page-selector');
+        /** @type {HTMLButtonElement} */
+        const addNewBtn = document.getElementById('add-new-btn');
+        /** @type {HTMLButtonElement} */
+        const deleteBtn = document.getElementById('delete-page-btn');
+        /** @type {HTMLButtonElement} */
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        /** @type {HTMLButtonElement} */
+        const exitFullscreenBtn = document.getElementById('exit-fullscreen-btn');
+        /** @type {HTMLButtonElement} */
+        const renamePageBtn = document.getElementById('rename-page-btn'); // 新增的更改名稱按鈕
+
+        // --- IndexedDB 資料庫設定 ---
+        const DB_NAME = 'WebPageSaverDB';
+        const STORE_NAME = 'pages';
+        /** @type {IDBDatabase} */
+        let db;
+
+        /**
+         * 初始化 IndexedDB 資料庫。
+         * 如果資料庫不存在或版本較舊，則會建立或升級它。
+         */
+        function initDB() {
+            const request = indexedDB.open(DB_NAME, 1);
+
+            request.onerror = (event) => {
+                console.error('資料庫開啟失敗:', event.target.errorCode);
+                alert('無法初始化資料庫，某些功能可能無法使用。');
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                const objectStore = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+                objectStore.createIndex('title', 'title', { unique: false });
+                console.log('資料庫升級/建立成功');
+            };
+
+            request.onsuccess = (event) => {
+                db = event.target.result;
+                console.log('資料庫連接成功');
+                loadPages();
+            };
+        }
+
+        /**
+         * 根據傳入的視圖名稱，顯示或隱藏對應的介面。
+         * @param {'add' | 'display'} view - 要顯示的視圖 ('add' 表示新增頁面, 'display' 表示顯示 iframe)。
+         */
+        function showView(view) {
+            if (view === 'add') {
+                addPageContainer.style.display = 'block';
+                contentIframe.style.display = 'none';
+                pageSelector.value = '';
+                deleteBtn.disabled = true;
+                renamePageBtn.disabled = true; // 新增：在新增模式下禁用重新命名按鈕
+            } else if (view === 'display') {
+                addPageContainer.style.display = 'none';
+                contentIframe.style.display = 'flex';
+                deleteBtn.disabled = false;
+                renamePageBtn.disabled = false; // 新增：在顯示模式下啟用重新命名按鈕
+            }
+            // 確保在非全螢幕模式下隱藏退出按鈕
+            document.body.classList.remove('fullscreen-iframe');
+            exitFullscreenBtn.style.display = 'none';
+        }
+
+        /**
+         * 從 IndexedDB 讀取所有已儲存的網頁，並將它們填入下拉選單中。
+         */
+        function loadPages() {
+            if (!db) return;
+            const transaction = db.transaction([STORE_NAME], 'readonly');
+            const objectStore = transaction.objectStore(STORE_NAME);
+            const request = objectStore.getAll();
+
+            request.onerror = (event) => console.error('無法讀取網頁列表:', event.target.errorCode);
+
+            request.onsuccess = (event) => {
+                const pages = event.target.result;
+                pageSelector.innerHTML = '<option value="">-- 請選擇要顯示的網頁 --</option>';
+
+                if (pages && pages.length > 0) {
+                    pages.forEach(page => {
+                        const option = document.createElement('option');
+                        option.value = page.id;
+                        option.textContent = page.title;
+                        pageSelector.appendChild(option);
+                    });
+                    // 預設顯示第一個網頁
+                    displayPage(pages[0].id);
+                } else {
+                    showView('add');
+                }
+            };
+        }
+
+        /**
+         * 根據提供的 ID，從資料庫中獲取網頁內容並在 iframe 中顯示。
+         * @param {number | string} id - 要顯示的網頁的 ID。
+         */
+        function displayPage(id) {
+            if (!db || !id) {
+                showView('add');
+                return;
+            }
+
+            const transaction = db.transaction([STORE_NAME], 'readonly');
+            const objectStore = transaction.objectStore(STORE_NAME);
+            const request = objectStore.get(parseInt(id, 10));
+
+            request.onerror = (event) => console.error('無法讀取網頁:', event.target.errorCode);
+
+            request.onsuccess = (event) => {
+                const page = event.target.result;
+                if (page) {
+                    contentIframe.srcdoc = page.html;
+                    pageSelector.value = id;
+                    showView('display');
+                } else {
+                    console.warn(`找不到 ID 為 ${id} 的網頁`);
+                    showView('add');
+                }
+            };
+        }
+
+        /**
+         * 將輸入框中的標題和 HTML 內容儲存到 IndexedDB。
+         */
+        function addPage() {
+            const title = titleInput.value.trim();
+            const html = htmlInput.value;
+
+            if (!title || !html) {
+                alert('網頁標題和 HTML 內容不能為空！');
+                return;
+            }
+
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const objectStore = transaction.objectStore(STORE_NAME);
+            const newPage = { title: title, html: html, createdAt: new Date() };
+
+            const request = objectStore.add(newPage);
+
+            request.onsuccess = (event) => {
+                const newId = event.target.result;
+                alert('網頁「' + title + '」已成功儲存！');
+                titleInput.value = '';
+                htmlInput.value = '';
+                loadPages();
+                setTimeout(() => displayPage(newId), 100);
+            };
+
+            request.onerror = (event) => {
+                console.error('儲存失敗:', event.target.errorCode);
+                alert('儲存網頁時發生錯誤。');
+            };
+        }
+        
+        /**
+         * 根據下拉選單目前選中的項目，從資料庫中刪除對應的網頁。
+         */
+        function deletePage() {
+            const idToDelete = pageSelector.value;
+            if (!idToDelete) {
+                alert('請先選擇一個要刪除的網頁。');
+                return;
+            }
+
+            const selectedOption = pageSelector.options[pageSelector.selectedIndex];
+            const pageTitle = selectedOption ? selectedOption.textContent : '該網頁';
+
+            if (!confirm(`確定要刪除「${pageTitle}」嗎？此操作無法復原。`)) {
+                return;
+            }
+
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const objectStore = transaction.objectStore(STORE_NAME);
+            const request = objectStore.delete(parseInt(idToDelete, 10));
+
+            request.onsuccess = () => {
+                alert(`網頁「${pageTitle}」已刪除。`);
+                loadPages();
+            };
+
+            request.onerror = (event) => {
+                console.error('刪除失敗:', event.target.errorCode);
+                alert('刪除網頁時發生錯誤。');
+            };
+        }
+
+        /**
+         * 更改目前選定網頁的名稱。
+         */
+        function renamePage() {
+            const idToRename = pageSelector.value;
+            if (!idToRename) {
+                alert('請先選擇一個要更改名稱的網頁。');
+                return;
+            }
+
+            const newTitle = prompt('請輸入新的網頁標題：');
+            if (newTitle === null || newTitle.trim() === '') {
+                alert('網頁標題不能為空或取消操作。');
+                return;
+            }
+
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const objectStore = transaction.objectStore(STORE_NAME);
+            const getRequest = objectStore.get(parseInt(idToRename, 10));
+
+            getRequest.onsuccess = (event) => {
+                const page = event.target.result;
+                if (page) {
+                    page.title = newTitle.trim();
+                    const updateRequest = objectStore.put(page);
+
+                    updateRequest.onsuccess = () => {
+                        alert(`網頁名稱已成功更改為「${newTitle}」。`);
+                        loadPages(); // 重新載入下拉選單以顯示新名稱
+                        // 確保選中更改名稱後的頁面
+                        setTimeout(() => pageSelector.value = idToRename, 50);
+                    };
+
+                    updateRequest.onerror = (event) => {
+                        console.error('更新名稱失敗:', event.target.errorCode);
+                        alert('更新網頁名稱時發生錯誤。');
+                    };
+                } else {
+                    alert('找不到要更改名稱的網頁。');
+                }
+            };
+
+            getRequest.onerror = (event) => {
+                console.error('獲取網頁失敗:', event.target.errorCode);
+                alert('獲取網頁資料時發生錯誤。');
+            };
+        }
+
+
+        /**
+         * 切換 iframe 的全螢幕模式（佔滿整個視窗）。
+         */
+        function toggleIframeFullscreen() {
+            if (document.body.classList.contains('fullscreen-iframe')) {
+                // 如果目前是全螢幕模式，則退出
+                document.body.classList.remove('fullscreen-iframe');
+                exitFullscreenBtn.style.display = 'none';
+                // 恢復導覽列顯示
+                document.getElementById('top-nav').style.display = 'flex';
+                // 恢復 iframe 和 addPageContainer 的顯示邏輯
+                if (pageSelector.value) {
+                    showView('display');
+                } else {
+                    showView('add');
+                }
+            } else {
+                // 如果目前不是全螢幕模式，則進入全螢幕
+                if (contentIframe.style.display === 'block' || contentIframe.style.display === 'flex') {
+                    document.body.classList.add('fullscreen-iframe');
+                    exitFullscreenBtn.style.display = 'block';
+                    // 隱藏導覽列和新增頁面容器，只顯示 iframe
+                    document.getElementById('top-nav').style.display = 'none';
+                    addPageContainer.style.display = 'none';
+                    contentIframe.style.display = 'block'; // 確保 iframe 顯示
+                } else {
+                    alert('請先選擇一個網頁才能進入全螢幕模式。');
+                }
+            }
+        }
+        
+        // --- 事件監聽器綁定 ---
+        saveBtn.addEventListener('click', addPage);
+        addNewBtn.addEventListener('click', () => showView('add'));
+        deleteBtn.addEventListener('click', deletePage);
+        renamePageBtn.addEventListener('click', renamePage); // 綁定重新命名按鈕的事件
+        fullscreenBtn.addEventListener('click', toggleIframeFullscreen);
+        exitFullscreenBtn.addEventListener('click', toggleIframeFullscreen);
+
+        pageSelector.addEventListener('change', (event) => {
+            const selectedId = event.target.value;
+            if (selectedId) {
+                displayPage(selectedId);
+            } else {
+                showView('add');
+            }
+        });
+
+        // --- 啟動應用程式 ---
+        initDB();
+    });
+    </script>
+
+</body>
+</html>
