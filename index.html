@@ -115,7 +115,7 @@
             margin-bottom: 20px;
         }
 
-        #page-title-input, #html-input {
+        #page-name-input, #file-content-input { /* 修改 ID */
             width: 100%;
             padding: 12px;
             border: 1px solid var(--border-color);
@@ -125,7 +125,7 @@
             font-size: 16px;
         }
 
-        #html-input {
+        #file-content-input { /* 修改 ID */
             min-height: 400px;
             resize: vertical;
             font-family: "Courier New", Courier, monospace;
@@ -204,25 +204,25 @@
 
     <nav id="top-nav">
         <div class="nav-controls">
-            <button id="add-new-btn">➕ 新增網頁</button>
-            <select id="page-selector">
-                <option value="">-- 請選擇要顯示的網頁 --</option>
+            <button id="add-new-btn">➕ 新增檔案</button>
+            <select id="file-selector"> <!-- 修改 ID -->
+                <option value="">-- 請選擇要顯示的檔案 --</option>
             </select>
-            <button id="rename-page-btn" disabled>✏️ 更改網頁名稱</button> <button id="delete-page-btn" disabled>🗑️ 刪除目前網頁</button>
+            <button id="rename-page-btn" disabled>✏️ 更改檔案名稱</button> <button id="delete-page-btn" disabled>🗑️ 刪除目前檔案</button> <!-- 修改文字 -->
             <button id="fullscreen-btn">🖼️ 全螢幕</button>
         </div>
     </nav>
 
     <main id="main-content">
         <div id="add-page-container">
-            <h2>儲存一個新的網頁</h2>
-            <p>請在下方輸入網頁標題與完整的 HTML 程式碼。</p>
-            <input type="text" id="page-title-input" placeholder="請輸入網頁標題（例如：Google 首頁）" required>
-            <textarea id="html-input" placeholder="在這裡貼上完整的 HTML 程式碼..."></textarea>
-            <button id="save-btn">儲存網頁</button>
+            <h2>儲存一個新的檔案</h2>
+            <p>請在下方輸入檔案名稱（包含副檔名，例如：index.html, js/script.js）與內容。</p>
+            <input type="text" id="page-name-input" placeholder="請輸入檔案名稱（例如：index.html 或 js/script.js）" required> <!-- 修改 ID 和 placeholder -->
+            <textarea id="file-content-input" placeholder="在這裡貼上檔案內容..."></textarea> <!-- 修改 ID 和 placeholder -->
+            <button id="save-btn">儲存檔案</button> <!-- 修改文字 -->
         </div>
 
-        <iframe id="content-iframe" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+        <iframe id="content-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe> <!-- 新增 allow-modals 允許彈出視窗 -->
     </main>
 
     <button id="exit-fullscreen-btn">✖ 離開全螢幕</button>
@@ -237,11 +237,11 @@
         /** @type {HTMLButtonElement} */
         const saveBtn = document.getElementById('save-btn');
         /** @type {HTMLInputElement} */
-        const titleInput = document.getElementById('page-title-input');
+        const nameInput = document.getElementById('page-name-input'); // 修改變數名稱
         /** @type {HTMLTextAreaElement} */
-        const htmlInput = document.getElementById('html-input');
+        const contentInput = document.getElementById('file-content-input'); // 修改變數名稱
         /** @type {HTMLSelectElement} */
-        const pageSelector = document.getElementById('page-selector');
+        const fileSelector = document.getElementById('file-selector'); // 修改變數名稱
         /** @type {HTMLButtonElement} */
         const addNewBtn = document.getElementById('add-new-btn');
         /** @type {HTMLButtonElement} */
@@ -251,56 +251,161 @@
         /** @type {HTMLButtonElement} */
         const exitFullscreenBtn = document.getElementById('exit-fullscreen-btn');
         /** @type {HTMLButtonElement} */
-        const renamePageBtn = document.getElementById('rename-page-btn'); // 新增的更改名稱按鈕
+        const renamePageBtn = document.getElementById('rename-page-btn');
 
         // --- IndexedDB 資料庫設定 ---
-        const DB_NAME = 'WebPageSaverDB';
-        const STORE_NAME = 'pages';
+        const DB_NAME = 'VirtualFileSystemDB'; // 修改資料庫名稱
+        const STORE_NAME = 'files'; // 修改儲存區名稱
         /** @type {IDBDatabase} */
         let db;
 
+        // --- Service Worker 相關變數 ---
+        let swRegistration;
+
+        /**
+         * 根據檔案名稱判斷 MIME 類型
+         * @param {string} filename
+         * @returns {string}
+         */
+        function getMimeType(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            switch (ext) {
+                case 'html': return 'text/html';
+                case 'htm': return 'text/html';
+                case 'css': return 'text/css';
+                case 'js': return 'application/javascript';
+                case 'json': return 'application/json';
+                case 'png': return 'image/png';
+                case 'jpg': return 'image/jpeg';
+                case 'jpeg': return 'image/jpeg';
+                case 'gif': return 'image/gif';
+                case 'svg': return 'image/svg+xml';
+                case 'ico': return 'image/x-icon';
+                case 'txt': return 'text/plain';
+                default: return 'application/octet-stream';
+            }
+        }
+
         /**
          * 初始化 IndexedDB 資料庫。
-         * 如果資料庫不存在或版本較舊，則會建立或升級它。
          */
         function initDB() {
             const request = indexedDB.open(DB_NAME, 1);
 
             request.onerror = (event) => {
                 console.error('資料庫開啟失敗:', event.target.errorCode);
-                alert('無法初始化資料庫，某些功能可能無法使用。');
+                // 使用自訂訊息框取代 alert
+                showMessageBox('錯誤', '無法初始化資料庫，某些功能可能無法使用。');
             };
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                const objectStore = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
-                objectStore.createIndex('title', 'title', { unique: false });
+                // keyPath 改為 'name'，並確保是唯一的
+                const objectStore = db.createObjectStore(STORE_NAME, { keyPath: 'name' });
                 console.log('資料庫升級/建立成功');
             };
 
             request.onsuccess = (event) => {
                 db = event.target.result;
                 console.log('資料庫連接成功');
-                loadPages();
+                loadFiles();
+                // 在 DB 準備好後，向 Service Worker 發送 DB 資訊
+                if (swRegistration && swRegistration.active) {
+                    sendDbToServiceWorker(swRegistration.active);
+                }
             };
         }
 
         /**
+         * 註冊 Service Worker。
+         */
+        function registerServiceWorker() {
+            if ('serviceWorker' in navigator) {
+                const swContent = document.getElementById('virtual-fs-sw-content').textContent;
+                const swBlob = new Blob([swContent], { type: 'application/javascript' });
+                const swBlobUrl = URL.createObjectURL(swBlob);
+
+                // Add a specific console log for this potential issue
+                console.log('嘗試註冊 Service Worker。如果出現 "URL protocol of the script is not supported" 錯誤，這可能是由於執行環境的限制，而非程式碼邏輯問題。');
+
+                navigator.serviceWorker.register(swBlobUrl, { scope: '/' }) // SW 作用域設為根目錄
+                    .then(registration => {
+                        swRegistration = registration;
+                        console.log('Service Worker 註冊成功，作用域:', registration.scope);
+                        // 當 SW 準備好時，向其發送 IndexedDB 實例
+                        if (registration.active) {
+                            sendDbToServiceWorker(registration.active);
+                        }
+                        registration.onupdatefound = () => {
+                            const installingWorker = registration.installing;
+                            if (installingWorker) {
+                                installingWorker.onstatechange = () => {
+                                    if (installingWorker.state === 'activated') {
+                                        console.log('新版 Service Worker 已啟用。');
+                                        sendDbToServiceWorker(installingWorker);
+                                    }
+                                };
+                            }
+                        };
+                    })
+                    .catch(error => {
+                        console.error('Service Worker 註冊失敗:', error);
+                        showMessageBox('錯誤', 'Service Worker 註冊失敗，虛擬檔案系統功能可能無法正常運作。錯誤原因：' + error.message);
+                    })
+                    .finally(() => {
+                        // 註冊嘗試結束後，釋放 Blob URL
+                        URL.revokeObjectURL(swBlobUrl);
+                    });
+            } else {
+                console.warn('您的瀏覽器不支援 Service Worker。虛擬檔案系統功能將無法使用。');
+                showMessageBox('警告', '您的瀏覽器不支援 Service Worker。網頁間互相讀取的功能將無法使用。');
+            }
+        }
+
+        /**
+         * 將 IndexedDB 實例透過 MessageChannel 發送給 Service Worker。
+         * 這樣 Service Worker 就可以直接訪問相同的 IndexedDB。
+         * @param {ServiceWorker} serviceWorker
+         */
+        function sendDbToServiceWorker(serviceWorker) {
+            if (!db || !serviceWorker) {
+                console.warn('DB 或 Service Worker 尚未準備好，無法發送。');
+                return;
+            }
+            const { port1, port2 } = new MessageChannel();
+            serviceWorker.postMessage({ type: 'INIT_DB', dbName: DB_NAME, storeName: STORE_NAME }, [port2]); // 傳遞 DB_NAME 和 STORE_NAME
+
+            port1.onmessage = (event) => {
+                if (event.data && event.data.status === 'DB_READY') {
+                    console.log('Service Worker 已確認接收到 DB 資訊並準備好。');
+                    // 確保 iframe 重新載入以使用 Service Worker
+                    if (contentIframe.contentWindow) {
+                        const currentFile = fileSelector.value;
+                        if (currentFile) {
+                            displayFile(currentFile); // 重新載入當前頁面以應用 SW
+                        }
+                    }
+                }
+            };
+        }
+
+
+        /**
          * 根據傳入的視圖名稱，顯示或隱藏對應的介面。
-         * @param {'add' | 'display'} view - 要顯示的視圖 ('add' 表示新增頁面, 'display' 表示顯示 iframe)。
+         * @param {'add' | 'display'} view - 要顯示的視圖 ('add' 表示新增檔案, 'display' 表示顯示 iframe)。
          */
         function showView(view) {
             if (view === 'add') {
                 addPageContainer.style.display = 'block';
                 contentIframe.style.display = 'none';
-                pageSelector.value = '';
+                fileSelector.value = '';
                 deleteBtn.disabled = true;
-                renamePageBtn.disabled = true; // 新增：在新增模式下禁用重新命名按鈕
+                renamePageBtn.disabled = true;
             } else if (view === 'display') {
                 addPageContainer.style.display = 'none';
                 contentIframe.style.display = 'flex';
                 deleteBtn.disabled = false;
-                renamePageBtn.disabled = false; // 新增：在顯示模式下啟用重新命名按鈕
+                renamePageBtn.disabled = false;
             }
             // 確保在非全螢幕模式下隱藏退出按鈕
             document.body.classList.remove('fullscreen-iframe');
@@ -308,29 +413,36 @@
         }
 
         /**
-         * 從 IndexedDB 讀取所有已儲存的網頁，並將它們填入下拉選單中。
+         * 從 IndexedDB 讀取所有已儲存的檔案，並將它們填入下拉選單中。
          */
-        function loadPages() {
+        function loadFiles() {
             if (!db) return;
             const transaction = db.transaction([STORE_NAME], 'readonly');
             const objectStore = transaction.objectStore(STORE_NAME);
             const request = objectStore.getAll();
 
-            request.onerror = (event) => console.error('無法讀取網頁列表:', event.target.errorCode);
+            request.onerror = (event) => console.error('無法讀取檔案列表:', event.target.errorCode);
 
             request.onsuccess = (event) => {
-                const pages = event.target.result;
-                pageSelector.innerHTML = '<option value="">-- 請選擇要顯示的網頁 --</option>';
+                const files = event.target.result;
+                fileSelector.innerHTML = '<option value="">-- 請選擇要顯示的檔案 --</option>';
 
-                if (pages && pages.length > 0) {
-                    pages.forEach(page => {
+                if (files && files.length > 0) {
+                    files.sort((a, b) => a.name.localeCompare(b.name)); // 按名稱排序
+
+                    files.forEach(file => {
                         const option = document.createElement('option');
-                        option.value = page.id;
-                        option.textContent = page.title;
-                        pageSelector.appendChild(option);
+                        option.value = file.name; // ID 現在是檔案名稱
+                        option.textContent = file.name;
+                        fileSelector.appendChild(option);
                     });
-                    // 預設顯示第一個網頁
-                    displayPage(pages[0].id);
+                    // 預設顯示第一個 HTML 檔案，如果沒有則顯示第一個檔案
+                    const firstHtmlFile = files.find(f => f.name.endsWith('.html') || f.name.endsWith('.htm'));
+                    if (firstHtmlFile) {
+                        displayFile(firstHtmlFile.name);
+                    } else {
+                        displayFile(files[0].name);
+                    }
                 } else {
                     showView('add');
                 }
@@ -338,145 +450,229 @@
         }
 
         /**
-         * 根據提供的 ID，從資料庫中獲取網頁內容並在 iframe 中顯示。
-         * @param {number | string} id - 要顯示的網頁的 ID。
+         * 根據提供的檔案名稱，從資料庫中獲取檔案內容並在 iframe 中顯示。
+         * 只有 HTML 檔案才能在 iframe 中直接顯示。
+         * 其他檔案類型不會觸發 iframe 的 src 載入，但 Service Worker 仍會處理它們。
+         * @param {string} filename - 要顯示的檔案的名稱。
          */
-        function displayPage(id) {
-            if (!db || !id) {
+        async function displayFile(filename) {
+            if (!db || !filename) {
                 showView('add');
                 return;
             }
 
+            // 對於非 HTML 檔案，我們只是選擇它，但不直接在 iframe 中顯示其內容。
+            // 這些檔案會由 Service Worker 處理當 iframe 中的 HTML 嘗試載入它們時。
+            if (!filename.endsWith('.html') && !filename.endsWith('.htm')) {
+                 // 嘗試從資料庫讀取內容並在 textarea 中顯示，以供編輯
+                const transaction = db.transaction([STORE_NAME], 'readonly');
+                const objectStore = transaction.objectStore(STORE_NAME);
+                const request = objectStore.get(filename);
+
+                request.onsuccess = (event) => {
+                    const file = event.target.result;
+                    if (file) {
+                        nameInput.value = file.name;
+                        contentInput.value = file.content;
+                        showView('add'); // 切換到編輯模式，以便查看/修改內容
+                        showMessageBox('提示', `檔案 "${filename}" 已選取，其內容已載入到編輯區。非 HTML 檔案無法在預覽區直接顯示。`);
+                    } else {
+                        console.warn(`找不到檔案: ${filename}`);
+                        showView('add');
+                    }
+                };
+                request.onerror = (event) => console.error('無法讀取檔案內容:', event.target.errorCode);
+                fileSelector.value = filename; // 確保選擇器顯示正確
+                return;
+            }
+
+
             const transaction = db.transaction([STORE_NAME], 'readonly');
             const objectStore = transaction.objectStore(STORE_NAME);
-            const request = objectStore.get(parseInt(id, 10));
+            const request = objectStore.get(filename);
 
-            request.onerror = (event) => console.error('無法讀取網頁:', event.target.errorCode);
+            request.onerror = (event) => console.error('無法讀取檔案:', event.target.errorCode);
 
             request.onsuccess = (event) => {
-                const page = event.target.result;
-                if (page) {
-                    contentIframe.srcdoc = page.html;
-                    pageSelector.value = id;
+                const file = event.target.result;
+                if (file) {
+                    // 使用 data URL 載入 iframe，這樣 Service Worker 才能攔截 iframe 內部的請求
+                    // 重要：iframe 的 src 必須與 Service Worker 的 scope 匹配才能被攔截
+                    // 這裡我們將 iframe 的 src 設定為一個虛擬路徑，Service Worker 會處理它。
+                    // 為了確保每次選擇都重新載入，我們加一個時間戳
+                    const iframeUrl = `/vfs/${file.name}?t=${Date.now()}`;
+                    contentIframe.src = iframeUrl; // 使用 src 而不是 srcdoc
+
+                    fileSelector.value = filename;
                     showView('display');
                 } else {
-                    console.warn(`找不到 ID 為 ${id} 的網頁`);
+                    console.warn(`找不到檔案: ${filename}`);
                     showView('add');
                 }
             };
         }
 
-        /**
-         * 將輸入框中的標題和 HTML 內容儲存到 IndexedDB。
-         */
-        function addPage() {
-            const title = titleInput.value.trim();
-            const html = htmlInput.value;
 
-            if (!title || !html) {
-                alert('網頁標題和 HTML 內容不能為空！');
+        /**
+         * 將輸入框中的檔案名稱和內容儲存到 IndexedDB。
+         */
+        function addFile() {
+            const name = nameInput.value.trim();
+            const content = contentInput.value;
+
+            if (!name || !content) {
+                showMessageBox('提示', '檔案名稱和內容不能為空！');
                 return;
             }
 
+            // 檢查檔案名稱是否有效 (不包含特殊路徑字符, 且有副檔名)
+            if (name.includes('..') || name.startsWith('/') || name.endsWith('/') || !name.includes('.')) {
+                showMessageBox('提示', '檔案名稱無效。請確保包含副檔名，且不包含開頭/結尾斜線或 ".."。');
+                return;
+            }
+
+            const mimeType = getMimeType(name);
+
             const transaction = db.transaction([STORE_NAME], 'readwrite');
             const objectStore = transaction.objectStore(STORE_NAME);
-            const newPage = { title: title, html: html, createdAt: new Date() };
 
-            const request = objectStore.add(newPage);
+            const newFile = { name: name, content: content, mimeType: mimeType, createdAt: new Date() };
+
+            const request = objectStore.put(newFile); // 使用 put 允許更新現有檔案
 
             request.onsuccess = (event) => {
-                const newId = event.target.result;
-                alert('網頁「' + title + '」已成功儲存！');
-                titleInput.value = '';
-                htmlInput.value = '';
-                loadPages();
-                setTimeout(() => displayPage(newId), 100);
+                showMessageBox('成功', '檔案「' + name + '」已成功儲存！');
+                nameInput.value = '';
+                contentInput.value = '';
+                loadFiles();
+                // 如果是 HTML 檔案，則顯示它
+                if (mimeType === 'text/html' || mimeType === 'text/htm') {
+                     setTimeout(() => displayFile(name), 100);
+                } else {
+                    // 如果是非 HTML 檔案，則切換到編輯模式並通知用戶
+                    showView('add');
+                }
             };
 
             request.onerror = (event) => {
-                console.error('儲存失敗:', event.target.errorCode);
-                alert('儲存網頁時發生錯誤。');
+                if (event.target.error.name === 'ConstraintError') {
+                    showMessageBox('錯誤', '檔案名稱已存在，請使用不同的名稱或重新命名現有檔案。');
+                } else {
+                    console.error('儲存失敗:', event.target.errorCode, event.target.error);
+                    showMessageBox('錯誤', '儲存檔案時發生錯誤。');
+                }
             };
         }
         
         /**
-         * 根據下拉選單目前選中的項目，從資料庫中刪除對應的網頁。
+         * 根據下拉選單目前選中的項目，從資料庫中刪除對應的檔案。
          */
-        function deletePage() {
-            const idToDelete = pageSelector.value;
-            if (!idToDelete) {
-                alert('請先選擇一個要刪除的網頁。');
+        function deleteFile() {
+            const nameToDelete = fileSelector.value;
+            if (!nameToDelete) {
+                showMessageBox('提示', '請先選擇一個要刪除的檔案。');
                 return;
             }
 
-            const selectedOption = pageSelector.options[pageSelector.selectedIndex];
-            const pageTitle = selectedOption ? selectedOption.textContent : '該網頁';
+            showConfirmationBox(`確定要刪除「${nameToDelete}」嗎？此操作無法復原。`, () => {
+                const transaction = db.transaction([STORE_NAME], 'readwrite');
+                const objectStore = transaction.objectStore(STORE_NAME);
+                const request = objectStore.delete(nameToDelete);
 
-            if (!confirm(`確定要刪除「${pageTitle}」嗎？此操作無法復原。`)) {
-                return;
-            }
+                request.onsuccess = () => {
+                    showMessageBox('成功', `檔案「${nameToDelete}」已刪除。`);
+                    loadFiles();
+                };
 
-            const transaction = db.transaction([STORE_NAME], 'readwrite');
-            const objectStore = transaction.objectStore(STORE_NAME);
-            const request = objectStore.delete(parseInt(idToDelete, 10));
-
-            request.onsuccess = () => {
-                alert(`網頁「${pageTitle}」已刪除。`);
-                loadPages();
-            };
-
-            request.onerror = (event) => {
-                console.error('刪除失敗:', event.target.errorCode);
-                alert('刪除網頁時發生錯誤。');
-            };
+                request.onerror = (event) => {
+                    console.error('刪除失敗:', event.target.errorCode);
+                    showMessageBox('錯誤', '刪除檔案時發生錯誤。');
+                };
+            });
         }
 
         /**
-         * 更改目前選定網頁的名稱。
+         * 更改目前選定檔案的名稱。
          */
-        function renamePage() {
-            const idToRename = pageSelector.value;
-            if (!idToRename) {
-                alert('請先選擇一個要更改名稱的網頁。');
+        function renameFile() {
+            const oldName = fileSelector.value;
+            if (!oldName) {
+                showMessageBox('提示', '請先選擇一個要更改名稱的檔案。');
                 return;
             }
 
-            const newTitle = prompt('請輸入新的網頁標題：');
-            if (newTitle === null || newTitle.trim() === '') {
-                alert('網頁標題不能為空或取消操作。');
-                return;
-            }
-
-            const transaction = db.transaction([STORE_NAME], 'readwrite');
-            const objectStore = transaction.objectStore(STORE_NAME);
-            const getRequest = objectStore.get(parseInt(idToRename, 10));
-
-            getRequest.onsuccess = (event) => {
-                const page = event.target.result;
-                if (page) {
-                    page.title = newTitle.trim();
-                    const updateRequest = objectStore.put(page);
-
-                    updateRequest.onsuccess = () => {
-                        alert(`網頁名稱已成功更改為「${newTitle}」。`);
-                        loadPages(); // 重新載入下拉選單以顯示新名稱
-                        // 確保選中更改名稱後的頁面
-                        setTimeout(() => pageSelector.value = idToRename, 50);
-                    };
-
-                    updateRequest.onerror = (event) => {
-                        console.error('更新名稱失敗:', event.target.errorCode);
-                        alert('更新網頁名稱時發生錯誤。');
-                    };
-                } else {
-                    alert('找不到要更改名稱的網頁。');
+            showPromptBox('請輸入新的檔案名稱（包含副檔名，例如：new_index.html）：', oldName, (newName) => {
+                if (newName === null || newName.trim() === '') {
+                    showMessageBox('提示', '檔案名稱不能為空或取消操作。');
+                    return;
                 }
-            };
+                const trimmedNewName = newName.trim();
 
-            getRequest.onerror = (event) => {
-                console.error('獲取網頁失敗:', event.target.errorCode);
-                alert('獲取網頁資料時發生錯誤。');
-            };
+                if (trimmedNewName.includes('..') || trimmedNewName.startsWith('/') || trimmedNewName.endsWith('/') || !trimmedNewName.includes('.')) {
+                    showMessageBox('提示', '新的檔案名稱無效。請確保包含副檔名，且不包含開頭/結尾斜線或 ".."。');
+                    return;
+                }
+
+                if (oldName === trimmedNewName) {
+                    showMessageBox('提示', '新舊名稱相同，無需更改。');
+                    return;
+                }
+
+                const transaction = db.transaction([STORE_NAME], 'readwrite');
+                const objectStore = transaction.objectStore(STORE_NAME);
+
+                // 1. 讀取舊檔案內容
+                const getRequest = objectStore.get(oldName);
+
+                getRequest.onsuccess = (event) => {
+                    const file = event.target.result;
+                    if (file) {
+                        // 2. 刪除舊檔案
+                        const deleteRequest = objectStore.delete(oldName);
+                        deleteRequest.onsuccess = () => {
+                            // 3. 儲存新檔案
+                            file.name = trimmedNewName; // 更新名稱
+                            file.mimeType = getMimeType(trimmedNewName); // 更新 MIME 類型
+                            const addRequest = objectStore.add(file); // 使用 add 因為 keyPath 變了
+
+                            addRequest.onsuccess = () => {
+                                showMessageBox('成功', `檔案「${oldName}」已成功更改名稱為「${trimmedNewName}」。`);
+                                loadFiles(); // 重新載入下拉選單以顯示新名稱
+                                // 確保選中更改名稱後的頁面
+                                setTimeout(() => {
+                                    fileSelector.value = trimmedNewName;
+                                    if (file.mimeType === 'text/html' || file.mimeType === 'text/htm') {
+                                        displayFile(trimmedNewName);
+                                    } else {
+                                        showView('add'); // 非 HTML 檔案顯示編輯介面
+                                    }
+                                }, 50);
+                            };
+
+                            addRequest.onerror = (event) => {
+                                 if (event.target.error.name === 'ConstraintError') {
+                                    showMessageBox('錯誤', '新的檔案名稱已存在，請選擇其他名稱。');
+                                 } else {
+                                    console.error('儲存新名稱檔案失敗:', event.target.errorCode, event.target.error);
+                                    showMessageBox('錯誤', '儲存新名稱檔案時發生錯誤。');
+                                 }
+                                 loadFiles(); // 無論如何都重新載入列表以確保狀態正確
+                            };
+                        };
+                        deleteRequest.onerror = (event) => {
+                            console.error('刪除舊檔案失敗:', event.target.errorCode);
+                            showMessageBox('錯誤', '刪除舊檔案時發生錯誤。');
+                        };
+                    } else {
+                        showMessageBox('錯誤', '找不到要更改名稱的檔案。');
+                    }
+                };
+
+                getRequest.onerror = (event) => {
+                    console.error('獲取檔案失敗:', event.target.errorCode);
+                    showMessageBox('錯誤', '獲取檔案資料時發生錯誤。');
+                };
+            });
         }
 
 
@@ -491,14 +687,16 @@
                 // 恢復導覽列顯示
                 document.getElementById('top-nav').style.display = 'flex';
                 // 恢復 iframe 和 addPageContainer 的顯示邏輯
-                if (pageSelector.value) {
-                    showView('display');
+                if (fileSelector.value) {
+                    displayFile(fileSelector.value); // 重新呼叫以恢復正常顯示
                 } else {
                     showView('add');
                 }
             } else {
                 // 如果目前不是全螢幕模式，則進入全螢幕
-                if (contentIframe.style.display === 'block' || contentIframe.style.display === 'flex') {
+                // 只有當 iframe 正在顯示 HTML 內容時才能進入全螢幕預覽模式
+                const selectedFile = fileSelector.value;
+                if (selectedFile && (selectedFile.endsWith('.html') || selectedFile.endsWith('.htm'))) {
                     document.body.classList.add('fullscreen-iframe');
                     exitFullscreenBtn.style.display = 'block';
                     // 隱藏導覽列和新增頁面容器，只顯示 iframe
@@ -506,23 +704,110 @@
                     addPageContainer.style.display = 'none';
                     contentIframe.style.display = 'block'; // 確保 iframe 顯示
                 } else {
-                    alert('請先選擇一個網頁才能進入全螢幕模式。');
+                    showMessageBox('提示', '請先選擇一個 HTML 檔案才能進入全螢幕預覽模式。');
                 }
             }
         }
+
+        // --- 自訂訊息框和確認框 (取代 alert/confirm/prompt) ---
+        function createModal(title, message, type = 'alert', callback = null, defaultValue = '') {
+            const existingModal = document.getElementById('custom-modal');
+            if (existingModal) existingModal.remove();
+
+            const modalHtml = `
+                <div id="custom-modal" style="
+                    position: fixed;
+                    top: 0; left: 0; width: 100%; height: 100%;
+                    background: rgba(0,0,0,0.6);
+                    display: flex; justify-content: center; align-items: center;
+                    z-index: 2000;
+                ">
+                    <div style="
+                        background: white; padding: 25px; border-radius: 8px;
+                        box-shadow: 0 5px 15px rgba(0,0,0,0.3); max-width: 400px; width: 90%;
+                        text-align: center;
+                    ">
+                        <h3 style="margin-top: 0; color: var(--primary-color);">${title}</h3>
+                        <p style="margin-bottom: 20px;">${message}</p>
+                        ${type === 'prompt' ? `<input type="text" id="modal-input" value="${defaultValue}" style="width: calc(100% - 24px); padding: 10px; margin-bottom: 15px; border: 1px solid var(--border-color); border-radius: 4px;">` : ''}
+                        <div style="display: flex; justify-content: center; gap: 10px;">
+                            ${type === 'confirm' || type === 'prompt' ? `<button id="modal-cancel-btn" style="padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; background-color: #6c757d; color: white;">取消</button>` : ''}
+                            <button id="modal-ok-btn" style="padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; background-color: var(--primary-color); color: white;">確認</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const modal = document.getElementById('custom-modal');
+            const okBtn = document.getElementById('modal-ok-btn');
+            const cancelBtn = document.getElementById('modal-cancel-btn');
+            const input = document.getElementById('modal-input');
+
+            okBtn.onclick = () => {
+                modal.remove();
+                if (callback) {
+                    if (type === 'prompt') {
+                        callback(input ? input.value : '');
+                    } else {
+                        callback(true);
+                    }
+                }
+            };
+
+            if (cancelBtn) {
+                cancelBtn.onclick = () => {
+                    modal.remove();
+                    if (callback) {
+                        if (type === 'prompt') {
+                            callback(null); // prompt 取消時傳回 null
+                        } else {
+                            callback(false);
+                        }
+                    }
+                };
+            }
+
+            if (input) {
+                input.focus();
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        okBtn.click();
+                    }
+                });
+            }
+        }
+
+        function showMessageBox(title, message) {
+            createModal(title, message, 'alert');
+        }
+
+        function showConfirmationBox(message, onConfirm) {
+            createModal('確認', message, 'confirm', (result) => {
+                if (result) onConfirm();
+            });
+        }
+
+        function showPromptBox(message, defaultValue, onInput) {
+            createModal('輸入', message, 'prompt', onInput, defaultValue);
+        }
         
         // --- 事件監聽器綁定 ---
-        saveBtn.addEventListener('click', addPage);
-        addNewBtn.addEventListener('click', () => showView('add'));
-        deleteBtn.addEventListener('click', deletePage);
-        renamePageBtn.addEventListener('click', renamePage); // 綁定重新命名按鈕的事件
+        saveBtn.addEventListener('click', addFile);
+        addNewBtn.addEventListener('click', () => {
+            showView('add');
+            nameInput.value = ''; // 清空名稱和內容以便新增
+            contentInput.value = '';
+        });
+        deleteBtn.addEventListener('click', deleteFile);
+        renamePageBtn.addEventListener('click', renameFile);
         fullscreenBtn.addEventListener('click', toggleIframeFullscreen);
         exitFullscreenBtn.addEventListener('click', toggleIframeFullscreen);
 
-        pageSelector.addEventListener('change', (event) => {
-            const selectedId = event.target.value;
-            if (selectedId) {
-                displayPage(selectedId);
+        fileSelector.addEventListener('change', (event) => {
+            const selectedName = event.target.value;
+            if (selectedName) {
+                displayFile(selectedName);
             } else {
                 showView('add');
             }
@@ -530,7 +815,127 @@
 
         // --- 啟動應用程式 ---
         initDB();
+        registerServiceWorker(); // 應用程式啟動時註冊 Service Worker
     });
+    </script>
+
+    <!-- Service Worker Script Content -->
+    <!-- 注意：此腳本的 content 將被主腳本讀取並作為 Blob URL 註冊 -->
+    <script type="text/plain" id="virtual-fs-sw-content">
+        // Service Worker 的程式碼必須是純 JavaScript
+        const DB_NAME_SW = 'VirtualFileSystemDB';
+        const STORE_NAME_SW = 'files';
+        let dbSW; // Service Worker 自己的 IndexedDB 實例
+
+        // 接收主線程發送的 IndexedDB 資訊
+        self.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'INIT_DB') {
+                // 收到主線程傳來的 DB 名稱和儲存區名稱
+                // 這裡不需要重新宣告 DB_NAME_SW 和 STORE_NAME_SW，因為它們是常數
+                // 但如果它們是變數，則可以更新
+                initDB_SW(); // 在 Service Worker 中初始化 DB
+                event.ports[0].postMessage({ status: 'DB_READY' }); // 通知主線程已準備好
+            }
+        });
+
+        // 在 Service Worker 中初始化 IndexedDB
+        function initDB_SW() {
+            if (dbSW) { // 如果已經初始化過，則直接返回
+                console.log('Service Worker: IndexedDB 已初始化。');
+                return;
+            }
+            const request = indexedDB.open(DB_NAME_SW, 1);
+
+            request.onerror = (event) => {
+                console.error('Service Worker: 資料庫開啟失敗:', event.target.errorCode);
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME_SW)) {
+                    db.createObjectStore(STORE_NAME_SW, { keyPath: 'name' });
+                }
+            };
+
+            request.onsuccess = (event) => {
+                dbSW = event.target.result;
+                console.log('Service Worker: 資料庫連接成功');
+            };
+        }
+
+        // 監聽 fetch 事件，攔截 iframe 內部的網路請求
+        self.addEventListener('fetch', (event) => {
+            const url = new URL(event.request.url);
+
+            // 我們只攔截來自於 `/vfs/` 路徑的請求，這些是我們虛擬檔案系統中的檔案
+            // 確保只處理同源請求，避免意外攔截外部資源
+            if (url.origin === self.location.origin && url.pathname.startsWith('/vfs/')) {
+                const filename = url.pathname.replace('/vfs/', '');
+                console.log(`Service Worker 攔截到請求: ${event.request.url}, 檔案名: ${filename}`);
+
+                event.respondWith(
+                    (async () => {
+                        // 確保 dbSW 已準備好
+                        if (!dbSW) {
+                            console.warn('Service Worker: IndexedDB 尚未準備好，等待初始化...');
+                            await new Promise(resolve => {
+                                const interval = setInterval(() => {
+                                    if (dbSW) {
+                                        clearInterval(interval);
+                                        resolve();
+                                    }
+                                }, 50); // 每 50ms 檢查一次
+                            });
+                        }
+
+                        try {
+                            const transaction = dbSW.transaction([STORE_NAME_SW], 'readonly');
+                            const objectStore = transaction.objectStore(STORE_NAME_SW);
+                            const request = objectStore.get(filename);
+
+                            return new Promise((resolve, reject) => {
+                                request.onsuccess = (event) => {
+                                    const file = event.target.result;
+                                    if (file) {
+                                        console.log(`Service Worker 找到檔案: ${file.name}, MIME: ${file.mimeType}`);
+                                        const response = new Response(file.content, {
+                                            headers: {
+                                                'Content-Type': file.mimeType,
+                                                // 這些標頭有助於在 iframe 中正確處理資源
+                                                'Cross-Origin-Opener-Policy': 'same-origin',
+                                                'Cross-Origin-Embedder-Policy': 'require-corp'
+                                            }
+                                        });
+                                        resolve(response);
+                                    } else {
+                                        console.warn(`Service Worker: 虛擬檔案系統中找不到檔案: ${filename}`);
+                                        // 如果虛擬檔案系統中找不到，則嘗試從網路獲取
+                                        fetch(event.request).then(response => {
+                                            if (response.ok) {
+                                                resolve(response);
+                                            } else {
+                                                resolve(new Response(`檔案未找到: ${filename}`, { status: 404, headers: { 'Content-Type': 'text/plain' } }));
+                                            }
+                                        }).catch(err => {
+                                            console.error('Service Worker 獲取網路資源失敗:', err);
+                                            resolve(new Response(`無法載入檔案或網路錯誤: ${filename}`, { status: 500 }));
+                                        });
+                                    }
+                                };
+
+                                request.onerror = (event) => {
+                                    console.error('Service Worker: 從 IndexedDB 讀取檔案失敗:', event.target.errorCode);
+                                    reject(new Response('IndexedDB 讀取錯誤', { status: 500 }));
+                                };
+                            });
+                        } catch (error) {
+                            console.error('Service Worker fetch 處理中發生錯誤:', error);
+                            return new Response('Service Worker 內部錯誤', { status: 500 });
+                        }
+                    })()
+                );
+            }
+        });
     </script>
 
 </body>
