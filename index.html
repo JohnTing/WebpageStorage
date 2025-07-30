@@ -318,17 +318,12 @@
 
         /**
          * 註冊 Service Worker。
+         * 【修正】: 移除 Blob URL 的方式，改為直接註冊外部 sw.js 檔案。
          */
         function registerServiceWorker() {
             if ('serviceWorker' in navigator) {
-                const swContent = document.getElementById('virtual-fs-sw-content').textContent;
-                const swBlob = new Blob([swContent], { type: 'application/javascript' });
-                const swBlobUrl = URL.createObjectURL(swBlob);
-
-                // Add a specific console log for this potential issue
-                console.log('嘗試註冊 Service Worker。如果出現 "URL protocol of the script is not supported" 錯誤，這可能是由於執行環境的限制，而非程式碼邏輯問題。');
-
-                navigator.serviceWorker.register(swBlobUrl, { scope: '/' }) // SW 作用域設為根目錄
+                // 直接註冊 sw.js 檔案，scope 設為根目錄，這樣它才能攔截 /vfs/ 路徑的請求
+                navigator.serviceWorker.register('sw.js', { scope: '/' })
                     .then(registration => {
                         swRegistration = registration;
                         console.log('Service Worker 註冊成功，作用域:', registration.scope);
@@ -351,10 +346,6 @@
                     .catch(error => {
                         console.error('Service Worker 註冊失敗:', error);
                         showMessageBox('錯誤', 'Service Worker 註冊失敗，虛擬檔案系統功能可能無法正常運作。錯誤原因：' + error.message);
-                    })
-                    .finally(() => {
-                        // 註冊嘗試結束後，釋放 Blob URL
-                        URL.revokeObjectURL(swBlobUrl);
                     });
             } else {
                 console.warn('您的瀏覽器不支援 Service Worker。虛擬檔案系統功能將無法使用。');
@@ -819,124 +810,12 @@
     });
     </script>
 
-    <!-- Service Worker Script Content -->
-    <!-- 注意：此腳本的 content 將被主腳本讀取並作為 Blob URL 註冊 -->
+    <!-- 【修正】: Service Worker 的 script 內容已移至 sw.js，這個區塊可以安全地刪除 -->
+    <!--
     <script type="text/plain" id="virtual-fs-sw-content">
-        // Service Worker 的程式碼必須是純 JavaScript
-        const DB_NAME_SW = 'VirtualFileSystemDB';
-        const STORE_NAME_SW = 'files';
-        let dbSW; // Service Worker 自己的 IndexedDB 實例
-
-        // 接收主線程發送的 IndexedDB 資訊
-        self.addEventListener('message', (event) => {
-            if (event.data && event.data.type === 'INIT_DB') {
-                // 收到主線程傳來的 DB 名稱和儲存區名稱
-                // 這裡不需要重新宣告 DB_NAME_SW 和 STORE_NAME_SW，因為它們是常數
-                // 但如果它們是變數，則可以更新
-                initDB_SW(); // 在 Service Worker 中初始化 DB
-                event.ports[0].postMessage({ status: 'DB_READY' }); // 通知主線程已準備好
-            }
-        });
-
-        // 在 Service Worker 中初始化 IndexedDB
-        function initDB_SW() {
-            if (dbSW) { // 如果已經初始化過，則直接返回
-                console.log('Service Worker: IndexedDB 已初始化。');
-                return;
-            }
-            const request = indexedDB.open(DB_NAME_SW, 1);
-
-            request.onerror = (event) => {
-                console.error('Service Worker: 資料庫開啟失敗:', event.target.errorCode);
-            };
-
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                if (!db.objectStoreNames.contains(STORE_NAME_SW)) {
-                    db.createObjectStore(STORE_NAME_SW, { keyPath: 'name' });
-                }
-            };
-
-            request.onsuccess = (event) => {
-                dbSW = event.target.result;
-                console.log('Service Worker: 資料庫連接成功');
-            };
-        }
-
-        // 監聽 fetch 事件，攔截 iframe 內部的網路請求
-        self.addEventListener('fetch', (event) => {
-            const url = new URL(event.request.url);
-
-            // 我們只攔截來自於 `/vfs/` 路徑的請求，這些是我們虛擬檔案系統中的檔案
-            // 確保只處理同源請求，避免意外攔截外部資源
-            if (url.origin === self.location.origin && url.pathname.startsWith('/vfs/')) {
-                const filename = url.pathname.replace('/vfs/', '');
-                console.log(`Service Worker 攔截到請求: ${event.request.url}, 檔案名: ${filename}`);
-
-                event.respondWith(
-                    (async () => {
-                        // 確保 dbSW 已準備好
-                        if (!dbSW) {
-                            console.warn('Service Worker: IndexedDB 尚未準備好，等待初始化...');
-                            await new Promise(resolve => {
-                                const interval = setInterval(() => {
-                                    if (dbSW) {
-                                        clearInterval(interval);
-                                        resolve();
-                                    }
-                                }, 50); // 每 50ms 檢查一次
-                            });
-                        }
-
-                        try {
-                            const transaction = dbSW.transaction([STORE_NAME_SW], 'readonly');
-                            const objectStore = transaction.objectStore(STORE_NAME_SW);
-                            const request = objectStore.get(filename);
-
-                            return new Promise((resolve, reject) => {
-                                request.onsuccess = (event) => {
-                                    const file = event.target.result;
-                                    if (file) {
-                                        console.log(`Service Worker 找到檔案: ${file.name}, MIME: ${file.mimeType}`);
-                                        const response = new Response(file.content, {
-                                            headers: {
-                                                'Content-Type': file.mimeType,
-                                                // 這些標頭有助於在 iframe 中正確處理資源
-                                                'Cross-Origin-Opener-Policy': 'same-origin',
-                                                'Cross-Origin-Embedder-Policy': 'require-corp'
-                                            }
-                                        });
-                                        resolve(response);
-                                    } else {
-                                        console.warn(`Service Worker: 虛擬檔案系統中找不到檔案: ${filename}`);
-                                        // 如果虛擬檔案系統中找不到，則嘗試從網路獲取
-                                        fetch(event.request).then(response => {
-                                            if (response.ok) {
-                                                resolve(response);
-                                            } else {
-                                                resolve(new Response(`檔案未找到: ${filename}`, { status: 404, headers: { 'Content-Type': 'text/plain' } }));
-                                            }
-                                        }).catch(err => {
-                                            console.error('Service Worker 獲取網路資源失敗:', err);
-                                            resolve(new Response(`無法載入檔案或網路錯誤: ${filename}`, { status: 500 }));
-                                        });
-                                    }
-                                };
-
-                                request.onerror = (event) => {
-                                    console.error('Service Worker: 從 IndexedDB 讀取檔案失敗:', event.target.errorCode);
-                                    reject(new Response('IndexedDB 讀取錯誤', { status: 500 }));
-                                };
-                            });
-                        } catch (error) {
-                            console.error('Service Worker fetch 處理中發生錯誤:', error);
-                            return new Response('Service Worker 內部錯誤', { status: 500 });
-                        }
-                    })()
-                );
-            }
-        });
+       ...
     </script>
+    -->
 
 </body>
 </html>
