@@ -87,7 +87,13 @@
 
         #add-page-container h2 { margin-top: 0; border-bottom: 2px solid var(--primary-color); padding-bottom: 10px; margin-bottom: 20px; }
         #page-name-input, #file-content-input { width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 5px; margin-bottom: 20px; box-sizing: border-box; font-size: 16px; }
+        
+        /* --- 功能 2 新增：上傳檔案按鈕的樣式 --- */
+        #file-uploader { margin-bottom: 15px; display: block; }
+        
         #file-content-input { min-height: 400px; resize: vertical; font-family: "Courier New", Courier, monospace; }
+        #file-content-input:disabled { background-color: #e9ecef; cursor: not-allowed; }
+        
         #save-btn { display: block; width: 100%; padding: 15px; font-size: 18px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.2s ease; }
         #save-btn:hover { background-color: #218838; }
 
@@ -123,9 +129,14 @@
     <main id="main-content">
         <div id="add-page-container">
             <h2>儲存一個新的檔案</h2>
-            <p>請在下方輸入檔案名稱（包含副檔名，例如：index.html, js/script.js）與內容。</p>
-            <input type="text" id="page-name-input" placeholder="請輸入檔案名稱（例如：index.html 或 js/script.js）" required>
+            <p>請在下方輸入檔案名稱（包含副檔名），並貼上內容或直接上傳檔案。</p>
+            <input type="text" id="page-name-input" placeholder="請輸入檔案名稱（例如：index.html）" required>
+            
+            <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+            <p style="margin-top:20px;"><b>方式一：手動貼上內容</b></p>
             <textarea id="file-content-input" placeholder="在這裡貼上檔案內容..."></textarea>
+            <label for="file-uploader"><b>方式二：直接上傳檔案</b></label>
+            <input type="file" id="file-uploader">
             <button id="save-btn">儲存檔案</button>
         </div>
         <iframe id="content-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-modals"></iframe>
@@ -147,8 +158,17 @@
         const exitFullscreenBtn = document.getElementById('exit-fullscreen-btn');
         const renamePageBtn = document.getElementById('rename-page-btn');
 
+        // --- 功能 2 新增：獲取上傳元件和管理上傳的檔案 ---
+        const fileUploader = document.getElementById('file-uploader');
+        let uploadedFile = null; 
+        // --- 功能 2 結束 ---
+
         const DB_NAME = 'VirtualFileSystemDB';
         const STORE_NAME = 'files';
+        // --- 功能 1 新增：定義 localStorage 的鍵名 ---
+        const LS_LAST_FILE_KEY = 'webSaverLastFile';
+        const LS_FULLSCREEN_KEY = 'webSaverIsFullscreen';
+        // --- 功能 1 結束 ---
         let db;
         let swRegistration;
 
@@ -173,10 +193,7 @@
 
         function initDB() {
             const request = indexedDB.open(DB_NAME, 1);
-            request.onerror = (event) => {
-                console.error('資料庫開啟失敗:', event.target.errorCode);
-                showMessageBox('錯誤', '無法初始化資料庫，某些功能可能無法使用。');
-            };
+            request.onerror = (event) => console.error('資料庫開啟失敗:', event.target.errorCode);
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
                 db.createObjectStore(STORE_NAME, { keyPath: 'name' });
@@ -191,42 +208,18 @@
             };
         }
 
-        /**
-         * 【修正後】: 使用動態 scope 註冊 Service Worker。
-         */
         function registerServiceWorker() {
             if ('serviceWorker' in navigator) {
-                // 動態計算 scope，使其永遠是當前頁面所在的目錄
                 const path = window.location.pathname;
                 const scope = path.substring(0, path.lastIndexOf('/') + 1);
-                console.log(`動態計算出的 Service Worker Scope 為: ${scope}`);
-
                 navigator.serviceWorker.register('sw.js', { scope: scope })
                     .then(registration => {
                         swRegistration = registration;
                         console.log('Service Worker 註冊成功，作用域:', registration.scope);
-                        if (registration.active) {
-                            sendDbToServiceWorker(registration.active);
-                        }
-                        registration.onupdatefound = () => {
-                            const installingWorker = registration.installing;
-                            if (installingWorker) {
-                                installingWorker.onstatechange = () => {
-                                    if (installingWorker.state === 'activated') {
-                                        console.log('新版 Service Worker 已啟用。');
-                                        sendDbToServiceWorker(installingWorker);
-                                    }
-                                };
-                            }
-                        };
-                    })
-                    .catch(error => {
-                        console.error('Service Worker 註冊失敗:', error);
-                        showMessageBox('錯誤', 'Service Worker 註冊失敗，虛擬檔案系統功能可能無法正常運作。錯誤原因：' + error.message);
-                    });
+                        if (registration.active) sendDbToServiceWorker(registration.active);
+                    }).catch(error => console.error('Service Worker 註冊失敗:', error));
             } else {
                 console.warn('您的瀏覽器不支援 Service Worker。');
-                showMessageBox('警告', '您的瀏覽器不支援 Service Worker。網頁間互相讀取的功能將無法使用。');
             }
         }
 
@@ -250,7 +243,12 @@
             contentIframe.style.display = view === 'display' ? 'flex' : 'none';
             deleteBtn.disabled = view !== 'display';
             renamePageBtn.disabled = view !== 'display';
-            if (view === 'add') fileSelector.value = '';
+            if (view === 'add') {
+                fileSelector.value = '';
+                // --- 功能 1 新增：當回到新增頁面時，清除上次檔案記錄 ---
+                localStorage.removeItem(LS_LAST_FILE_KEY);
+                // --- 功能 1 結束 ---
+            }
         }
 
         function loadFiles() {
@@ -267,23 +265,19 @@
                         option.textContent = file.name;
                         fileSelector.appendChild(option);
                     });
-                    const firstHtmlFile = files.find(f => f.name.endsWith('.html') || f.name.endsWith('.htm')) || files[0];
-                    if (firstHtmlFile) displayFile(firstHtmlFile.name);
+                    // --- 功能 1 修改：在檔案載入後，恢復上次狀態 ---
+                    restoreLastState();
                 } else {
                     showView('add');
                 }
             };
         }
         
-        /**
-         * 【修正後】: 使用動態路徑生成 iframe 的 src，確保其在 Service Worker 的 scope 內。
-         */
         function displayFile(filename) {
             if (!db || !filename) { showView('add'); return; }
 
             const transaction = db.transaction([STORE_NAME], 'readonly');
-            const objectStore = transaction.objectStore(STORE_NAME);
-            const request = objectStore.get(filename);
+            const request = transaction.objectStore(STORE_NAME).get(filename);
 
             request.onerror = (event) => console.error('無法讀取檔案:', event.target.errorCode);
             request.onsuccess = (event) => {
@@ -291,6 +285,9 @@
                 if (!file) { showView('add'); return; }
 
                 fileSelector.value = filename;
+                // --- 功能 1 新增：記錄當前顯示的檔案 ---
+                localStorage.setItem(LS_LAST_FILE_KEY, filename);
+                // --- 功能 1 結束 ---
 
                 if (!filename.endsWith('.html') && !filename.endsWith('.htm')) {
                     nameInput.value = file.name;
@@ -300,37 +297,68 @@
                     return;
                 }
                 
-                // 動態計算基礎路徑，使其與 SW 的 scope 保持一致
                 const path = window.location.pathname;
                 const basePath = path.substring(0, path.lastIndexOf('/') + 1);
-
-                // 產生的 URL 會是像 /WebpageStorage/vfs/index.html 這樣的路徑
-                const iframeUrl = `${basePath}vfs/${file.name}?t=${Date.now()}`;
-                contentIframe.src = iframeUrl;
+                contentIframe.src = `${basePath}vfs/${file.name}?t=${Date.now()}`;
                 showView('display');
             };
         }
 
+        // --- 功能 2 修改：重構 addFile 以處理檔案上傳和文字區塊兩種情況 ---
         function addFile() {
             const name = nameInput.value.trim();
-            const content = contentInput.value;
-            if (!name || !content) { showMessageBox('提示', '檔案名稱和內容不能為空！'); return; }
-            if (name.includes('..') || name.startsWith('/') || name.endsWith('/') || !name.includes('.')) { showMessageBox('提示', '檔案名稱無效。'); return; }
 
+            if (!name) {
+                showMessageBox('提示', '檔案名稱不能為空！');
+                return;
+            }
+            if (name.includes('..') || name.startsWith('/') || name.endsWith('/') || !name.includes('.')) {
+                showMessageBox('提示', '檔案名稱無效。');
+                return;
+            }
+
+            // 優先處理上傳的檔案
+            if (uploadedFile) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    saveFileToDB(name, e.target.result);
+                };
+                reader.onerror = () => {
+                    showMessageBox('錯誤', '讀取上傳的檔案時發生錯誤。');
+                };
+                reader.readAsText(uploadedFile); // 以文字形式讀取
+            } else { // 處理文字區塊的內容
+                const content = contentInput.value;
+                if (!content) {
+                    showMessageBox('提示', '檔案內容不能為空！');
+                    return;
+                }
+                saveFileToDB(name, content);
+            }
+        }
+        
+        // --- 功能 2 新增：將儲存邏輯抽取成單獨函式 ---
+        function saveFileToDB(name, content) {
+            if (!db) return;
             const transaction = db.transaction([STORE_NAME], 'readwrite');
             const objectStore = transaction.objectStore(STORE_NAME);
             const newFile = { name: name, content: content, mimeType: getMimeType(name), createdAt: new Date() };
             const request = objectStore.put(newFile);
+
             request.onsuccess = () => {
                 showMessageBox('成功', `檔案「${name}」已儲存！`);
-                nameInput.value = '';
-                contentInput.value = '';
+                resetAddForm();
                 loadFiles();
-                if (getMimeType(name) === 'text/html') setTimeout(() => displayFile(name), 100);
+                if (getMimeType(name) === 'text/html') {
+                    setTimeout(() => displayFile(name), 100);
+                }
             };
             request.onerror = (event) => {
-                if (event.target.error.name === 'ConstraintError') { showMessageBox('錯誤', '檔案名稱已存在。'); } 
-                else { showMessageBox('錯誤', '儲存檔案時發生錯誤。'); }
+                if (event.target.error.name === 'ConstraintError') {
+                    showMessageBox('錯誤', '檔案名稱已存在。');
+                } else {
+                    showMessageBox('錯誤', '儲存檔案時發生錯誤。');
+                }
             };
         }
 
@@ -339,7 +367,15 @@
             if (!nameToDelete) return;
             showConfirmationBox(`確定要刪除「${nameToDelete}」嗎？`, () => {
                 const request = db.transaction([STORE_NAME], 'readwrite').objectStore(STORE_NAME).delete(nameToDelete);
-                request.onsuccess = () => { showMessageBox('成功', `檔案「${nameToDelete}」已刪除。`); loadFiles(); };
+                request.onsuccess = () => {
+                    // --- 功能 1 新增：如果刪除的是最後開啟的檔案，也從 localStorage 移除 ---
+                    if (localStorage.getItem(LS_LAST_FILE_KEY) === nameToDelete) {
+                        localStorage.removeItem(LS_LAST_FILE_KEY);
+                    }
+                    // --- 功能 1 結束 ---
+                    showMessageBox('成功', `檔案「${nameToDelete}」已刪除。`);
+                    loadFiles();
+                };
                 request.onerror = () => showMessageBox('錯誤', '刪除檔案時發生錯誤。');
             });
         }
@@ -379,11 +415,63 @@
             });
         }
         
+        // --- 功能 1 修改：切換全螢幕時記錄狀態 ---
         function toggleIframeFullscreen() {
-            const isFullscreen = document.body.classList.toggle('fullscreen-iframe');
-            exitFullscreenBtn.style.display = isFullscreen ? 'block' : 'none';
+            const isNowFullscreen = document.body.classList.toggle('fullscreen-iframe');
+            exitFullscreenBtn.style.display = isNowFullscreen ? 'block' : 'none';
+            localStorage.setItem(LS_FULLSCREEN_KEY, isNowFullscreen);
         }
         
+        // --- 功能 1 新增：還原上次狀態的函式 ---
+        function restoreLastState() {
+            const lastFile = localStorage.getItem(LS_LAST_FILE_KEY);
+            const wasFullscreen = localStorage.getItem(LS_FULLSCREEN_KEY) === 'true';
+
+            // 檢查檔案是否存在於下拉選單中
+            if (lastFile && fileSelector.querySelector(`option[value="${lastFile}"]`)) {
+                displayFile(lastFile);
+                // 如果是可顯示的 HTML 檔案且上次為全螢幕，則恢復全螢幕
+                if (wasFullscreen && (lastFile.endsWith('.html') || lastFile.endsWith('.htm'))) {
+                    // 使用 setTimeout 確保 iframe 有足夠時間渲染
+                    setTimeout(toggleIframeFullscreen, 10);
+                }
+            } else {
+                // 如果沒有上次的檔案，就顯示第一個檔案
+                const firstHtmlFile = Array.from(fileSelector.options).find(opt => opt.value.endsWith('.html') || opt.value.endsWith('.htm'));
+                if (firstHtmlFile) {
+                    displayFile(firstHtmlFile.value);
+                } else if (fileSelector.options.length > 1) {
+                    displayFile(fileSelector.options[1].value);
+                } else {
+                    showView('add'); // 沒有任何檔案
+                }
+            }
+        }
+        
+        // --- 功能 2 新增：重設新增表單狀態的函式 ---
+        function resetAddForm() {
+            nameInput.value = '';
+            contentInput.value = '';
+            contentInput.disabled = false;
+            contentInput.placeholder = "在這裡貼上檔案內容...";
+            fileUploader.value = ''; // 清空已選的檔案
+            uploadedFile = null;
+        }
+
+        // --- 功能 2 新增：處理檔案上傳的事件 ---
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                resetAddForm();
+                return;
+            }
+            uploadedFile = file;
+            nameInput.value = file.name; // 自動填入檔名
+            contentInput.value = '';
+            contentInput.placeholder = `已選擇檔案：${file.name}，內容將從此檔案讀取。`;
+            contentInput.disabled = true;
+        }
+
         function createModal(title, message, type, callback, defaultValue) {
             document.getElementById('custom-modal')?.remove();
             const modalHtml = `<div id="custom-modal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;justify-content:center;align-items:center;z-index:2000;"><div style="background:white;padding:25px;border-radius:8px;box-shadow:0 5px 15px rgba(0,0,0,0.3);max-width:400px;width:90%;text-align:center;"><h3 style="margin-top:0;color:var(--primary-color);">${title}</h3><p style="margin-bottom:20px;">${message}</p>${type === 'prompt' ? `<input type="text" id="modal-input" value="${defaultValue || ''}" style="width:calc(100% - 24px);padding:10px;margin-bottom:15px;border:1px solid var(--border-color);border-radius:4px;">` : ''}<div style="display:flex;justify-content:center;gap:10px;">${type!=='alert' ? `<button id="modal-cancel-btn" style="padding:10px 20px;border:none;border-radius:5px;cursor:pointer;background-color:#6c757d;color:white;">取消</button>` : ''}<button id="modal-ok-btn" style="padding:10px 20px;border:none;border-radius:5px;cursor:pointer;background-color:var(--primary-color);color:white;">確認</button></div></div></div>`;
@@ -399,12 +487,17 @@
         function showPromptBox(message, defaultValue, onInput) { createModal('輸入', message, 'prompt', onInput, defaultValue); }
 
         saveBtn.addEventListener('click', addFile);
-        addNewBtn.addEventListener('click', () => { showView('add'); nameInput.value = ''; contentInput.value = ''; });
+        addNewBtn.addEventListener('click', () => {
+            showView('add');
+            resetAddForm(); // 使用重設函式
+        });
         deleteBtn.addEventListener('click', deleteFile);
         renamePageBtn.addEventListener('click', renameFile);
         fullscreenBtn.addEventListener('click', toggleIframeFullscreen);
         exitFullscreenBtn.addEventListener('click', toggleIframeFullscreen);
         fileSelector.addEventListener('change', (e) => e.target.value ? displayFile(e.target.value) : showView('add'));
+        // --- 功能 2 新增：綁定檔案上傳事件 ---
+        fileUploader.addEventListener('change', handleFileUpload);
 
         initDB();
         registerServiceWorker();
