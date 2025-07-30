@@ -125,18 +125,51 @@
             padding: 12px;
             border: 1px solid var(--border-color);
             border-radius: 5px;
-            margin-bottom: 20px;
+            margin-bottom: 5px;
             box-sizing: border-box;
             font-size: 16px;
         }
 
-        #file-uploader {
-            margin-bottom: 15px;
-            display: block;
+        /* --- 新增: 拖曳上傳區塊的樣式 --- */
+        #drop-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 5px;
+            text-align: center;
+            color: #6c757d;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            margin-bottom: 10px;
         }
 
+        #drop-zone .file-upload-label {
+            color: var(--primary-color);
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        
+        /* 隱藏原始的檔案上傳 input */
+        #drop-zone input[type="file"] {
+            display: none;
+        }
+
+        /* Hover 特效 */
+        #drop-zone:hover {
+            background-color: #f8f9fa;
+            border-color: var(--primary-color);
+        }
+
+        /* 檔案被拖曳到上方時的特效 */
+        #drop-zone.drag-over {
+            background-color: #e9ecef;
+            border-style: solid;
+            border-color: var(--primary-color);
+            transform: scale(1.02);
+        }
+        /* --- 新增樣式結束 --- */
+
         #file-content-input {
-            min-height: 400px;
+            min-height: 300px;
             resize: vertical;
             font-family: "Courier New", Courier, monospace;
         }
@@ -196,14 +229,14 @@
 
         #exit-fullscreen-btn {
             position: fixed;
-            top: 15px;
-            right: 15px;
+            top: 10px;
+            right: 10px;
             background-color: rgba(0, 0, 0, 0.7);
             color: white;
             border: none;
             border-radius: 5px;
             padding: 8px 12px;
-            font-size: 14px;
+            font-size: 12px;
             cursor: pointer;
             z-index: 1001;
             display: none;
@@ -232,13 +265,15 @@
     <main id="main-content">
         <div id="add-page-container">
             <h2>儲存一個新的檔案</h2>
+            
+            <div id="drop-zone">
 
-            <label for="file-uploader"><b>直接上傳檔案</b></label>
-            <input type="file" id="file-uploader">
-            <hr style="border: none; border-top: 1px solid #eee;">
-            <p>請在下方輸入檔案名稱（包含副檔名），並貼上內容或直接上傳檔案。</p>
+            
+            <label>請在下方輸入檔案名稱（包含副檔名），並貼上內容或<label for="file-uploader" class="file-upload-label">直接上傳檔案</label>。</label>
             <input type="text" id="page-name-input" placeholder="請輸入檔案名稱（例如：index.html, my-image.jpg）" required>
-            <p><b>手動貼上文字內容</b></p>
+            <input type="file" id="file-uploader">
+            </div>
+            <label><b>手動貼上文字內容</b></label>
             <textarea id="file-content-input" placeholder="在這裡貼上檔案內容..."></textarea>
 
             <button id="save-btn">儲存檔案</button>
@@ -262,64 +297,56 @@
             const exitFullscreenBtn = document.getElementById('exit-fullscreen-btn');
             const renamePageBtn = document.getElementById('rename-page-btn');
             const fileUploader = document.getElementById('file-uploader');
+            const dropZone = document.getElementById('drop-zone'); // --- 新增: 取得拖曳區塊元素 ---
 
             let uploadedFile = null;
             const DB_NAME = 'VirtualFileSystemDB';
             const STORE_NAME = 'files';
-            // --- 移除: 不再需要 localStorage keys ---
-            // const LS_LAST_FILE_KEY = 'webSaverLastFile';
-            // const LS_FULLSCREEN_KEY = 'webSaverIsFullscreen';
+            const ORIGINAL_TITLE = document.title; // --- 新增: 儲存原始網頁標題 ---
             let db;
             let swRegistration;
             let currentObjectUrl = null;
 
-            // --- 新增: URL 參數管理相關函式 ---
-            /**
-             * 讀取 URL query 參數並回傳 URLSearchParams 物件
-             * @returns {URLSearchParams}
-             */
             function getUrlParams() {
                 return new URLSearchParams(window.location.search);
             }
 
-            /**
-             * 更新 URL 參數且不重新載入頁面
-             * @param {{target: string|null, fullscreen: boolean|null}} params - 要設定的參數
-             * @param {'push'|'replace'} method - 'push' 建立新歷史紀錄, 'replace' 取代當前紀錄
-             */
             function updateUrl(params, method = 'push') {
                 const url = new URL(window.location);
                 const currentParams = getUrlParams();
-                
-                // 處理 target 參數
                 if (params.hasOwnProperty('target')) {
                     if (params.target) url.searchParams.set('target', params.target);
                     else url.searchParams.delete('target');
                 } else if (currentParams.has('target')) {
-                    // 如果沒提供 target，但 URL 上有，則保留它
                     url.searchParams.set('target', currentParams.get('target'));
                 }
-
-                // 處理 fullscreen 參數
                 if (params.hasOwnProperty('fullscreen')) {
                     if (params.fullscreen) url.searchParams.set('fullscreen', 'true');
                     else url.searchParams.delete('fullscreen');
                 } else if(currentParams.has('fullscreen')) {
                      url.searchParams.set('fullscreen', currentParams.get('fullscreen'));
                 }
-
-                // 只有在 URL 真的改變時才更新歷史紀錄
                 if (window.location.href !== url.href) {
                     if (method === 'push') {
                         history.pushState({}, '', url);
-                    } else { // 'replace'
+                    } else {
                         history.replaceState({}, '', url);
                     }
                 }
             }
-            // --- 新增功能結束 ---
 
+            // --- 新增: 動態更新網頁標題的函式 ---
+            function updatePageTitle() {
+                const isFullscreen = document.body.classList.contains('fullscreen-iframe');
+                const currentFile = fileSelector.value;
 
+                if (isFullscreen && currentFile) {
+                    document.title = currentFile;
+                } else {
+                    document.title = ORIGINAL_TITLE;
+                }
+            }
+            
             function getMimeType(filename) {
                 const ext = filename.split('.').pop().toLowerCase();
                 switch (ext) {
@@ -348,7 +375,7 @@
                 request.onsuccess = (event) => {
                     db = event.target.result;
                     console.log('資料庫連接成功');
-                    loadFiles(); // 載入檔案後會觸發 initializeApp
+                    loadFiles();
                     if (swRegistration && swRegistration.active) {
                         sendDbToServiceWorker(swRegistration.active);
                     }
@@ -412,16 +439,15 @@
                             fileSelector.appendChild(option);
                         });
                     }
-                    // --- 修改: 載入檔案後，根據 URL 初始化應用狀態 ---
                     initializeApp();
                 };
             }
             
-            // --- MODIFIED: displayFile 函式，增加 updateHistory 參數 ---
             function displayFile(filename, updateHistory = true) {
                 if (!db || !filename) {
                     showView('add');
                     if (updateHistory) updateUrl({ target: null }, 'push');
+                    updatePageTitle(); // --- 修改: 更新標題 ---
                     return;
                 }
                 if (currentObjectUrl) {
@@ -441,12 +467,11 @@
                     }
 
                     fileSelector.value = filename;
-                    // --- 修改: 根據參數更新 URL ---
                     if (updateHistory) {
                         updateUrl({ target: filename }, 'push');
                     }
                     
-                    showView('display'); // 預設顯示 iframe 視圖
+                    showView('display');
 
                     const mimeType = file.mimeType || getMimeType(file.name);
                     if (mimeType === 'text/html') {
@@ -464,18 +489,19 @@
                             contentInput.value = file.content;
                         }
                         nameInput.value = file.name;
-                        showView('add'); // 切換到編輯視圖
-                        fullscreenBtn.disabled = true; // 文字檔不可全螢幕
+                        showView('add');
+                        fullscreenBtn.disabled = true;
                         console.log('提示', `檔案 "${filename}" 是文字檔，其內容已載入到編輯區。`);
                     } else {
                         nameInput.value = file.name;
                         contentInput.value = '';
                         contentInput.placeholder = `無法直接預覽此檔案類型 (${mimeType})。`;
                         contentInput.disabled = true;
-                        showView('add'); // 切換到編輯視圖
-                        fullscreenBtn.disabled = true; // 未知檔案不可全螢幕
+                        showView('add');
+                        fullscreenBtn.disabled = true;
                         showMessageBox('提示', `無法預覽 "${filename}"。`);
                     }
+                    updatePageTitle(); // --- 修改: 顯示檔案後更新標題 ---
                 };
             }
 
@@ -515,8 +541,7 @@
                 request.onsuccess = () => {
                     showMessageBox('成功', `檔案「${name}」已儲存！`);
                     resetAddForm();
-                    loadFiles(); // 會重新載入列表並觸發 initializeApp
-                    // --- 修改: 儲存後，立即跳轉到該檔案 ---
+                    loadFiles();
                     setTimeout(() => displayFile(name), 100);
                 };
                 request.onerror = (event) => {
@@ -535,9 +560,8 @@
                     const request = db.transaction([STORE_NAME], 'readwrite').objectStore(STORE_NAME).delete(nameToDelete);
                     request.onsuccess = () => {
                         showMessageBox('成功', `檔案「${nameToDelete}」已刪除。`);
-                        // --- 修改: 更新 URL ---
                         updateUrl({ target: null, fullscreen: false }, 'replace');
-                        loadFiles(); // 會重新載入列表並觸發 initializeApp
+                        loadFiles();
                     };
                     request.onerror = () => showMessageBox('錯誤', '刪除檔案時發生錯誤。');
                 });
@@ -565,49 +589,43 @@
                             const addRequest = objectStore.add(file);
                             addRequest.onsuccess = () => {
                                 showMessageBox('成功', '檔案名稱已更改。');
-                                // --- 修改: 更新 URL ---
                                 updateUrl({ target: trimmedNewName }, 'replace');
-                                loadFiles(); // 會重新載入列表並觸發 initializeApp
+                                loadFiles();
                             };
                             addRequest.onerror = (e) => {
                                 if (e.target.error.name === 'ConstraintError') showMessageBox('錯誤', '新的檔案名稱已存在。');
                                 else showMessageBox('錯誤', '儲存新檔案失敗。');
-                                loadFiles(); // 失敗也要重新載入以還原狀態
+                                loadFiles();
                             };
                         };
                     };
                 });
             }
             
-            // --- MODIFIED: toggleIframeFullscreen 函式 ---
             function toggleIframeFullscreen() {
                 const isNowFullscreen = document.body.classList.toggle('fullscreen-iframe');
                 exitFullscreenBtn.style.display = isNowFullscreen ? 'block' : 'none';
-                // --- 修改: 更新 URL 以反映全螢幕狀態 ---
                 updateUrl({ fullscreen: isNowFullscreen }, 'replace');
+                updatePageTitle(); // --- 修改: 切換全螢幕時更新標題 ---
             }
 
-            // --- 新增: 根據 URL 初始化應用的核心函式 ---
             function initializeApp() {
                 const params = getUrlParams();
                 const targetFile = params.get('target');
                 const isFullscreen = params.get('fullscreen') === 'true';
 
                 if (targetFile && fileSelector.querySelector(`option[value="${targetFile}"]`)) {
-                    // 根據 URL 顯示檔案，但不產生新的歷史紀錄
                     displayFile(targetFile, false);
                     
                     if (isFullscreen) {
-                        // 確保全螢幕狀態正確，不使用 toggle 以免意外關閉
                         document.body.classList.add('fullscreen-iframe');
                         exitFullscreenBtn.style.display = 'block';
+                        updatePageTitle(); // --- 修改: 初始化時若為全螢幕，也更新標題 ---
                     }
                 } else {
-                    // 如果 URL 中沒有有效 target，則顯示新增頁面
                     showView('add');
                 }
             }
-
 
             function resetAddForm() {
                 nameInput.value = '';
@@ -617,10 +635,10 @@
                 fileUploader.value = '';
                 uploadedFile = null;
             }
-
-            function handleFileUpload(event) {
-                const file = event.target.files[0];
-                if (!file) {
+            
+            // --- 修改: 將檔案處理邏輯獨立出來，以便拖曳和點擊共用 ---
+            function processUploadedFile(file) {
+                 if (!file) {
                     resetAddForm();
                     return;
                 }
@@ -629,6 +647,11 @@
                 contentInput.value = '';
                 contentInput.placeholder = `已選擇檔案：${file.name}。\n儲存時將會讀取此檔案的內容。`;
                 contentInput.disabled = true;
+            }
+
+            function handleFileUpload(event) {
+                const file = event.target.files[0];
+                processUploadedFile(file);
             }
 
             function createModal(title, message, type, callback, defaultValue) {
@@ -645,12 +668,11 @@
             function showConfirmationBox(message, onConfirm) { createModal('確認', message, 'confirm', (res) => { if (res) onConfirm(); }); }
             function showPromptBox(message, defaultValue, onInput) { createModal('輸入', message, 'prompt', onInput, defaultValue); }
 
-            // --- 修改事件監聽器 ---
+            // --- 事件監聽器 ---
             saveBtn.addEventListener('click', addFile);
             addNewBtn.addEventListener('click', () => {
                 showView('add');
                 resetAddForm();
-                // 新增：點擊「新增」時，更新 URL
                 updateUrl({ target: null, fullscreen: false }, 'push');
             });
             deleteBtn.addEventListener('click', deleteFile);
@@ -658,19 +680,41 @@
             fullscreenBtn.addEventListener('click', toggleIframeFullscreen);
             exitFullscreenBtn.addEventListener('click', toggleIframeFullscreen);
             
-            // 選擇檔案時，呼叫 displayFile，它會處理 URL 的更新
             fileSelector.addEventListener('change', (e) => {
                 if (e.target.value) {
                     displayFile(e.target.value);
                 } else {
                     showView('add');
                     updateUrl({ target: null, fullscreen: false }, 'push');
+                    updatePageTitle(); // --- 修改: 清除選擇時也要更新標題 ---
                 }
             });
 
             fileUploader.addEventListener('change', handleFileUpload);
             
-            // --- 新增: 監聽瀏覽器的前進/後退按鈕事件 ---
+            // --- 新增: 拖曳上傳的事件監聽器 ---
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault(); // 必須阻止預設行為才能觸發 drop
+                dropZone.classList.add('drag-over');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('drag-over');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault(); // 阻止瀏覽器開啟檔案
+                dropZone.classList.remove('drag-over');
+                
+                const files = e.dataTransfer.files;
+                if (files.length) {
+                    processUploadedFile(files[0]);
+                    // 將拖曳的檔案賦值給隱藏的 input，以便邏輯一致
+                    fileUploader.files = files;
+                }
+            });
+            // --- 新增監聽器結束 ---
+
             window.addEventListener('popstate', initializeApp);
 
             // 初始化
