@@ -483,6 +483,10 @@
                         currentObjectUrl = URL.createObjectURL(blob);
                         contentIframe.src = currentObjectUrl;
                     } else if (mimeType.startsWith('text/') || mimeType === 'application/javascript' || mimeType === 'application/json') {
+                        const path = window.location.pathname;
+                        const basePath = path.substring(0, path.lastIndexOf('/') + 1);
+                        contentIframe.src = `${basePath}vfs/${file.name}?t=${Date.now()}`;
+                        /*
                         if (file.content instanceof ArrayBuffer) {
                             contentInput.value = new TextDecoder().decode(file.content);
                         } else {
@@ -491,7 +495,7 @@
                         nameInput.value = file.name;
                         showView('add');
                         fullscreenBtn.disabled = true;
-                        console.log('提示', `檔案 "${filename}" 是文字檔，其內容已載入到編輯區。`);
+                        console.log('提示', `檔案 "${filename}" 是文字檔，其內容已載入到編輯區。`); */
                     } else {
                         nameInput.value = file.name;
                         contentInput.value = '';
